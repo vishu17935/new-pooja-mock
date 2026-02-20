@@ -11,6 +11,8 @@ SHEET_URL = "https://docs.google.com/spreadsheets/d/1msc3DBtNx-xx04CdoG7-dCNkz4w
 POSITIVE_MARK = 1
 NEGATIVE_MARK = 0.25
 
+# (file replaced — see below)
+
 # ===============================
 # PAGE CONFIG
 # ===============================
