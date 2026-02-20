@@ -11,8 +11,6 @@ SHEET_URL = "https://docs.google.com/spreadsheets/d/1msc3DBtNx-xx04CdoG7-dCNkz4w
 POSITIVE_MARK = 1
 NEGATIVE_MARK = 0.25
 
-# (file replaced — see below)
-
 # ===============================
 # PAGE CONFIG
 # ===============================
@@ -93,45 +91,28 @@ def compute_metrics(df, subjects):
 
 
 # ===============================
-# DASHBOARD
+# FIGURE 1: Line Charts
 # ===============================
-def create_dashboard(df, subjects):
-    n_cols = max(3, len(subjects))
-
-    # Row 1: line charts | Row 2: pie charts
-    specs = [
-        [{"type": "xy"}] * n_cols,
-        [{"type": "domain"}] * n_cols,
-    ]
-
-    line_titles = ["Accuracy", "Attempt Ratio", "Normalized Score"]
-    pie_titles = [f"{s.capitalize()} — Latest Test" for s in subjects]
-    # Pad pie titles if fewer subjects than cols
-    pie_titles += [""] * (n_cols - len(subjects))
-
-    subplot_titles = line_titles + [""] * (n_cols - 3) + pie_titles
-
-    fig = make_subplots(
-        rows=2,
-        cols=n_cols,
-        specs=specs,
-        subplot_titles=subplot_titles,
-        vertical_spacing=0.18,
-        horizontal_spacing=0.07,
-    )
-
+def create_line_charts(df, subjects):
     COLORS = ["#4C9BE8", "#E8704C", "#4CE8A0", "#C44CE8", "#E8C44C"]
-    OVERALL_COLOR = "#FFFFFF"
+    OVERALL_COLOR = "#f0f0f0"
 
     metrics = [
-        ("accuracy",        "Accuracy"),
-        ("attempt_ratio",   "Attempt Ratio"),
-        ("normalized_score","Normalized Score"),
+        ("accuracy",         "Accuracy"),
+        ("attempt_ratio",    "Attempt Ratio"),
+        ("normalized_score", "Normalized Score"),
     ]
+
+    fig = make_subplots(
+        rows=1,
+        cols=3,
+        subplot_titles=["Accuracy", "Attempt Ratio", "Normalized Score"],
+        horizontal_spacing=0.08,
+    )
 
     for col_idx, (key, ylabel) in enumerate(metrics):
         col = col_idx + 1
-        first_chart = col_idx == 0  # only add to legend on first chart
+        first_chart = col_idx == 0
 
         for j, s in enumerate(subjects):
             fig.add_trace(
@@ -162,12 +143,46 @@ def create_dashboard(df, subjects):
             row=1, col=col,
         )
 
-        fig.update_yaxes(title_text=ylabel, row=1, col=col, gridcolor="#333")
-        fig.update_xaxes(title_text="Test #", row=1, col=col, gridcolor="#333")
+        fig.update_yaxes(title_text=ylabel, row=1, col=col)
+        fig.update_xaxes(title_text="Test #", row=1, col=col)
 
-    # Pie charts — latest test
-    latest = df.iloc[-1]
+    fig.update_layout(
+        height=380,
+        paper_bgcolor="#1a1a2e",
+        plot_bgcolor="#16213e",
+        font=dict(color="#e0e0e0", size=12),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.08,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(0,0,0,0.3)",
+            bordercolor="#444",
+            borderwidth=1,
+        ),
+        margin=dict(t=60, b=40, l=40, r=40),
+    )
+
+    fig.update_xaxes(showgrid=True, gridcolor="#2a2a4a", zeroline=False)
+    fig.update_yaxes(showgrid=True, gridcolor="#2a2a4a", zeroline=False)
+
+    return fig
+
+
+# ===============================
+# FIGURE 2: Pie Charts
+# ===============================
+def create_pie_charts(df, subjects):
     PIE_COLORS = ["#4CE8A0", "#E8704C", "#888888"]
+    latest = df.iloc[-1]
+
+    fig = make_subplots(
+        rows=1,
+        cols=len(subjects),
+        specs=[[{"type": "domain"}] * len(subjects)],
+        subplot_titles=[f"{s.capitalize()} — Latest Test" for s in subjects],
+    )
 
     for i, s in enumerate(subjects):
         fig.add_trace(
@@ -181,33 +196,28 @@ def create_dashboard(df, subjects):
                 name=s.capitalize(),
                 marker=dict(colors=PIE_COLORS),
                 hole=0.35,
-                showlegend=False,
                 textinfo="label+percent",
+                showlegend=(i == 0),
             ),
-            row=2, col=i + 1,
+            row=1, col=i + 1,
         )
 
     fig.update_layout(
-        height=780,
+        height=350,
         paper_bgcolor="#1a1a2e",
-        plot_bgcolor="#16213e",
         font=dict(color="#e0e0e0", size=12),
         legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=1.02,
+            y=1.08,
             xanchor="right",
             x=1,
             bgcolor="rgba(0,0,0,0.3)",
             bordercolor="#444",
             borderwidth=1,
         ),
-        margin=dict(t=80, b=40, l=40, r=40),
+        margin=dict(t=60, b=20, l=20, r=20),
     )
-
-    # Style all xy axes consistently
-    fig.update_xaxes(showgrid=True, gridcolor="#2a2a4a", zeroline=False)
-    fig.update_yaxes(showgrid=True, gridcolor="#2a2a4a", zeroline=False)
 
     return fig
 
@@ -220,5 +230,10 @@ df = compute_metrics(df, subjects)
 
 st.caption(f"Last updated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-fig = create_dashboard(df, subjects)
-st.plotly_chart(fig, use_container_width=True)
+st.subheader("Trends Over Tests")
+fig_lines = create_line_charts(df, subjects)
+st.plotly_chart(fig_lines, use_container_width=True)
+
+st.subheader("Latest Test Breakdown")
+fig_pies = create_pie_charts(df, subjects)
+st.plotly_chart(fig_pies, use_container_width=True)
