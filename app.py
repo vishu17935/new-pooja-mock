@@ -48,77 +48,75 @@ def load_data():
     if df.empty:
         return pd.DataFrame(), []
 
-    # Flatten multi-index columns safely
-    new_cols = []
-    for c in df.columns:
-        if isinstance(c, tuple):
-            if c[0].strip().lower() == "date":
-                new_cols.append("test_number")
-            else:
-                new_cols.append(f"{c[0].strip().lower()}_{c[1].strip().lower()}")
+    # Clean MultiIndex levels aggressively
+    level0 = df.columns.get_level_values(0).astype(str).str.strip().str.lower()
+    level1 = df.columns.get_level_values(1).astype(str).str.strip().str.lower()
+
+    df.columns = pd.MultiIndex.from_arrays([level0, level1])
+
+    # Identify date column
+    if "date" not in level0:
+        st.error("No 'Date' column found.")
+        return pd.DataFrame(), []
+
+    # Extract subjects from level0 excluding date
+    subjects = sorted(set(level0) - {"date"})
+
+    # Flatten properly
+    flat_cols = []
+    for l0, l1 in df.columns:
+        if l0 == "date":
+            flat_cols.append("test_number")
         else:
-            new_cols.append(str(c).strip().lower())
+            flat_cols.append(f"{l0}_{l1}")
 
-    df.columns = new_cols
+    df.columns = flat_cols
 
-    # Convert numeric columns only (exclude test_number)
+    # Convert numeric columns
     for col in df.columns:
         if col != "test_number":
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # Drop rows with missing test_number
     df = df.dropna(subset=["test_number"])
-
-    # Sort properly
     df = df.sort_values("test_number").reset_index(drop=True)
-
-    subjects = sorted({
-        col.split("_")[0]
-        for col in df.columns
-        if "_" in col and col.endswith("_attempted")
-    })
 
     return df, subjects
 
 
 # ===============================
+# SAFE DIVISION
+# ===============================
+def safe_divide(n, d):
+    return np.where(d == 0, 0, n / d)
+
+
+# ===============================
 # CALCULATIONS
 # ===============================
-def safe_divide(numerator, denominator):
-    return np.where(denominator == 0, 0, numerator / denominator)
-
-
 def compute_metrics(df, subjects):
-
-    if df.empty or not subjects:
-        return df
 
     df = df.copy()
 
     for s in subjects:
-        required_cols = [f"{s}_attempted", f"{s}_wrong", f"{s}_unattempt"]
-        if not all(col in df.columns for col in required_cols):
-            continue
 
-        df[f"{s}_total"] = df[f"{s}_attempted"] + df[f"{s}_unattempt"]
-        df[f"{s}_correct"] = df[f"{s}_attempted"] - df[f"{s}_wrong"]
+        attempted = df.get(f"{s}_attempted", 0)
+        wrong = df.get(f"{s}_wrong", 0)
+        unattempt = df.get(f"{s}_unattempt", 0)
 
-        df[f"{s}_accuracy"] = safe_divide(
-            df[f"{s}_correct"], df[f"{s}_attempted"]
-        )
+        df[f"{s}_total"] = attempted + unattempt
+        df[f"{s}_correct"] = attempted - wrong
 
-        df[f"{s}_attempt_ratio"] = safe_divide(
-            df[f"{s}_attempted"], df[f"{s}_total"]
-        )
+        df[f"{s}_accuracy"] = safe_divide(df[f"{s}_correct"], attempted)
+        df[f"{s}_attempt_ratio"] = safe_divide(attempted, df[f"{s}_total"])
 
-        net = df[f"{s}_correct"] * POSITIVE_MARK - df[f"{s}_wrong"] * NEGATIVE_MARK
+        net = df[f"{s}_correct"] * POSITIVE_MARK - wrong * NEGATIVE_MARK
         df[f"{s}_net_score"] = net
         df[f"{s}_normalized_score"] = safe_divide(net, df[f"{s}_total"])
 
-    # Overall calculations
-    attempted_cols = [f"{s}_attempted" for s in subjects if f"{s}_attempted" in df]
-    wrong_cols = [f"{s}_wrong" for s in subjects if f"{s}_wrong" in df]
-    unattempt_cols = [f"{s}_unattempt" for s in subjects if f"{s}_unattempt" in df]
+    # Overall
+    attempted_cols = [f"{s}_attempted" for s in subjects]
+    wrong_cols = [f"{s}_wrong" for s in subjects]
+    unattempt_cols = [f"{s}_unattempt" for s in subjects]
 
     df["total_attempted"] = df[attempted_cols].sum(axis=1)
     df["total_wrong"] = df[wrong_cols].sum(axis=1)
@@ -145,7 +143,7 @@ def compute_metrics(df, subjects):
 
 
 # ===============================
-# FIGURE 1: Line Charts
+# LINE CHARTS
 # ===============================
 def create_line_charts(df, subjects):
 
@@ -155,16 +153,12 @@ def create_line_charts(df, subjects):
         ("normalized_score", "Normalized Score"),
     ]
 
-    fig = make_subplots(
-        rows=1,
-        cols=3,
-        subplot_titles=[m[1] for m in metrics],
-        horizontal_spacing=0.08,
-    )
+    fig = make_subplots(rows=1, cols=3,
+                        subplot_titles=[m[1] for m in metrics])
 
-    for col_idx, (key, ylabel) in enumerate(metrics):
-        col = col_idx + 1
-        first_chart = col_idx == 0
+    for idx, (key, title) in enumerate(metrics):
+        col = idx + 1
+        show_legend = idx == 0
 
         for s in subjects:
             fig.add_trace(
@@ -173,11 +167,9 @@ def create_line_charts(df, subjects):
                     y=df[f"{s}_{key}"],
                     mode="lines+markers",
                     name=s.capitalize(),
-                    legendgroup=s,
-                    showlegend=first_chart,
+                    showlegend=show_legend,
                 ),
-                row=1,
-                col=col,
+                row=1, col=col
             )
 
         fig.add_trace(
@@ -186,36 +178,28 @@ def create_line_charts(df, subjects):
                 y=df[f"overall_{key}"],
                 mode="lines+markers",
                 name="Overall",
-                legendgroup="overall",
-                showlegend=first_chart,
-                line=dict(dash="dash"),
+                showlegend=show_legend,
+                line=dict(dash="dash")
             ),
-            row=1,
-            col=col,
+            row=1, col=col
         )
 
-        fig.update_yaxes(title_text=ylabel, row=1, col=col)
-        fig.update_xaxes(title_text="Test #", row=1, col=col)
-
-    fig.update_layout(height=400, margin=dict(t=60, b=40, l=40, r=40))
+    fig.update_layout(height=400)
     return fig
 
 
 # ===============================
-# FIGURE 2: Pie Charts
+# PIE CHARTS
 # ===============================
 def create_pie_charts(df, subjects):
-
-    if df.empty:
-        return go.Figure()
 
     latest = df.iloc[-1]
 
     fig = make_subplots(
         rows=1,
         cols=len(subjects),
-        specs=[[{"type": "domain"}] * len(subjects)],
-        subplot_titles=[f"{s.capitalize()} — Latest Test" for s in subjects],
+        specs=[[{"type": "domain"}]*len(subjects)],
+        subplot_titles=[f"{s.capitalize()} — Latest Test" for s in subjects]
     )
 
     for i, s in enumerate(subjects):
@@ -223,18 +207,17 @@ def create_pie_charts(df, subjects):
             go.Pie(
                 labels=["Correct", "Wrong", "Unattempted"],
                 values=[
-                    latest.get(f"{s}_correct", 0),
-                    latest.get(f"{s}_wrong", 0),
-                    latest.get(f"{s}_unattempt", 0),
+                    latest[f"{s}_correct"],
+                    latest[f"{s}_wrong"],
+                    latest[f"{s}_unattempt"],
                 ],
                 hole=0.35,
-                showlegend=(i == 0),
+                showlegend=(i == 0)
             ),
-            row=1,
-            col=i + 1,
+            row=1, col=i+1
         )
 
-    fig.update_layout(height=350, margin=dict(t=60, b=20, l=20, r=20))
+    fig.update_layout(height=350)
     return fig
 
 
